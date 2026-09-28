@@ -13,7 +13,8 @@
  * Le assegnazioni inserite a mano (criterio diverso da "Auto · ...") non vengono toccate.
  *
  * @param {!Date} data giorno da coprire.
- * @return {{assegnate: number, manuali: number, scoperte: !Array<string>, totale: number}}
+ * @return {{assegnate: number, manuali: number, aPagamento: number,
+ *           scoperte: !Array<string>, totale: number}}
  */
 function calcolaSostituzioni_(data) {
   const ss = SpreadsheetApp.getActive();
@@ -36,16 +37,10 @@ function calcolaSostituzioni_(data) {
   });
 
   const daCoprire = assenze.filter(function (a) { return !a.bloccata; });
-
-  // Si parte dalle ore con meno candidati: riduce i casi in cui l'unico
-  // docente possibile viene "consumato" da un'ora più facile da coprire.
-  daCoprire.sort(function (a, b) {
-    const na = (disponibilita[a.ora] || []).length;
-    const nb = (disponibilita[b.ora] || []).length;
-    return na !== nb ? na - nb : a.ora - b.ora;
-  });
-
   const scoperte = [];
+  let aPagamento = 0;
+
+  const perOra = {};
   daCoprire.forEach(function (assenza) {
     if (!assenza.ora || !assenza.classe) {
       assenza.sostituto = '';
@@ -53,17 +48,48 @@ function calcolaSostituzioni_(data) {
       scoperte.push('riga ' + assenza._riga + ' (' + assenza.docente + '): ora o classe mancante');
       return;
     }
+    if (!perOra[assenza.ora]) { perOra[assenza.ora] = []; }
+    perOra[assenza.ora].push(assenza);
+  });
 
-    const scelta = scegliSostituto_(assenza, disponibilita[assenza.ora] || [], contesto);
-    if (scelta) {
-      assenza.sostituto = scelta.nome;
-      assenza.criterio = MARCA_AUTO + scelta.criterio + ' (' + scelta.tipo + ')';
-      registraImpegno_(contesto, scelta.chiave, assenza.ora);
-    } else {
+  // Si parte dalle ore con meno candidati per classe scoperta: il tetto giornaliero
+  // lega le ore fra loro e i docenti scarsi vanno spesi dove servono di più.
+  const ore = Object.keys(perOra).map(Number).sort(function (a, b) {
+    const ra = (disponibilita[a] || []).length / perOra[a].length;
+    const rb = (disponibilita[b] || []).length / perOra[b].length;
+    return ra !== rb ? ra - rb : a - b;
+  });
+
+  ore.forEach(function (ora) {
+    const aperte = perOra[ora].slice();
+
+    // Nella stessa ora si assegna prima la coppia classe-docente con l'affinità più alta:
+    // così un docente del consiglio di classe non finisce in una classe che non conosce
+    // solo perché quella riga compariva prima nel foglio.
+    while (aperte.length) {
+      let migliore = null;
+      let indice = -1;
+      aperte.forEach(function (assenza, i) {
+        const scelta = scegliSostituto_(assenza, disponibilita[ora] || [], contesto);
+        if (scelta && (!migliore || scelta.punti > migliore.punti)) {
+          migliore = scelta;
+          indice = i;
+        }
+      });
+      if (!migliore) { break; }
+
+      const assenza = aperte.splice(indice, 1)[0];
+      assenza.sostituto = migliore.nome;
+      assenza.criterio = MARCA_AUTO + migliore.criterio + ' (' + migliore.tipo + ')';
+      if (normalizza_(migliore.tipo) === normalizza_(TIPO_A_PAGAMENTO)) { aPagamento++; }
+      registraImpegno_(contesto, migliore.chiave, ora);
+    }
+
+    aperte.forEach(function (assenza) {
       assenza.sostituto = '';
       assenza.criterio = MARCA_AUTO + 'nessun docente disponibile';
-      scoperte.push(assenza.ora + 'ª ora, ' + assenza.classe + ' (' + assenza.docente + ')');
-    }
+      scoperte.push(ora + 'ª ora, ' + assenza.classe + ' (' + assenza.docente + ')');
+    });
   });
 
   scriviAssegnazioni_(ss, assenze);
@@ -72,6 +98,7 @@ function calcolaSostituzioni_(data) {
     totale: assenze.length,
     manuali: assenze.filter(function (a) { return a.bloccata; }).length,
     assegnate: daCoprire.filter(function (a) { return a.sostituto; }).length,
+    aPagamento: aPagamento,
     scoperte: scoperte
   };
 }
@@ -121,6 +148,9 @@ function valutaCandidato_(candidato, assenza, contesto) {
   if (stessaDisciplina) { punti += contesto.pesoDisciplina; }
   punti += contesto.bonusTipo[normalizza_(candidato.tipo)] || 0;
 
+  if (normalizza_(candidato.tipo) === normalizza_(TIPO_A_PAGAMENTO)) {
+    punti -= contesto.penalitaPagamento;
+  }
   if (normalizza_(contesto.ruoloPerDocente[candidato.chiave]) === 'sostegno') {
     punti -= contesto.penalitaSostegno;
   }
@@ -178,6 +208,7 @@ function costruisciContesto_(ss, imp, data, assenze) {
     pesoClasse: imp.numero('Peso stessa classe'),
     pesoDisciplina: imp.numero('Peso stessa disciplina'),
     penalitaSostegno: imp.numero('Penalità docente di sostegno'),
+    penalitaPagamento: imp.numero('Penalità disponibilità a pagamento'),
     penalitaGiorno: imp.numero('Penalità per ogni sostituzione già assegnata oggi'),
     penalitaStorico: imp.numero('Penalità per ogni sostituzione recente'),
     maxAlGiorno: Math.max(1, imp.numero('Max sostituzioni per docente al giorno') || 2)
@@ -261,10 +292,11 @@ function leggiDisponibilita_(ss, data) {
       : normalizza_(riga['Giorno']) === giorno;
     if (!valeOggi) { return; }
 
-    const dal = aData_(riga['Valida dal']);
-    if (dal && data < dal) { return; }
-    const al = aData_(riga['Valida al']);
-    if (al && data > al) { return; }
+    // Confronto sui giorni di calendario (aaaa-mm-gg), non sugli istanti: gli estremi sono inclusi.
+    const dal = chiaveData_(riga['Valida dal']);
+    if (dal && chiave < dal) { return; }
+    const al = chiaveData_(riga['Valida al']);
+    if (al && chiave > al) { return; }
 
     const chiaveDocente = normalizza_(nome);
     const chiaveRiga = ora + '|' + chiaveDocente;

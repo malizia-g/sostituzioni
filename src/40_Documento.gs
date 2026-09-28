@@ -221,8 +221,19 @@ function creaDocumentoModello() {
   doc.saveAndClose();
   scriviImpostazione_(ss, 'ID documento template', doc.getId());
 
+  // DocumentApp.create salva sempre nella radice del Drive: se è impostata una
+  // cartella di destinazione, il modello va messo lì insieme ai documenti generati.
+  let posizione = 'nella cartella principale del tuo Drive';
+  const idCartella = imp.testo('ID cartella di destinazione');
+  if (idCartella) {
+    const cartella = DriveApp.getFolderById(idCartella);
+    DriveApp.getFileById(doc.getId()).moveTo(cartella);
+    posizione = 'nella cartella "' + cartella.getName() + '"';
+  }
+
   avvisa_('Modello creato',
-    'Ho creato il documento "' + doc.getName() + '" e ne ho salvato l\'ID nelle impostazioni.\n\n' +
+    'Ho creato il documento "' + doc.getName() + '" ' + posizione +
+    ' e ne ho salvato l\'ID nelle impostazioni.\n\n' +
     'Puoi aprirlo e personalizzarlo (logo, intestazione, firme): basta non cancellare ' +
     'i segnaposto fra doppie parentesi graffe.\n\n' + doc.getUrl());
 }

@@ -5,6 +5,11 @@ const assert = require('assert');
 
 const DIR = __dirname;
 
+// Come in Apps Script con il manifest del progetto: lo script gira in Europe/Rome,
+// mentre il foglio può avere un fuso orario diverso (vedi scenario 4).
+process.env.TZ = 'Europe/Rome';
+let fusoFoglio = 'Europe/Rome';
+
 // ---- foglio finto --------------------------------------------------------
 function Foglio(valori) { this.v = valori; }
 Foglio.prototype.getLastRow = function () { return this.v.length; };
@@ -40,16 +45,20 @@ const SpreadsheetAppStub = {
   getActive: function () {
     return {
       getSheetByName: function (nome) { return fogli[nome] || null; },
-      getSpreadsheetTimeZone: function () { return 'Europe/Rome'; }
+      getSpreadsheetTimeZone: function () { return fusoFoglio; }
     };
   }
 };
+// Utilities.formatDate rispetta il fuso orario richiesto, come quello vero.
 const UtilitiesStub = {
   formatDate: function (data, tz, formato) {
-    const p = function (n) { return String(n).padStart(2, '0'); };
-    if (formato === 'yyyy-MM-dd') { return data.getFullYear() + '-' + p(data.getMonth() + 1) + '-' + p(data.getDate()); }
-    if (formato === 'dd/MM/yyyy') { return p(data.getDate()) + '/' + p(data.getMonth() + 1) + '/' + data.getFullYear(); }
-    return String(data);
+    const parti = {};
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short'
+    }).formatToParts(data).forEach(function (p) { parti[p.type] = p.value; });
+    const u = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[parti.weekday];
+    return formato.replace(/^u$/, String(u))
+      .replace('yyyy', parti.year).replace('MM', parti.month).replace('dd', parti.day);
   }
 };
 
@@ -58,7 +67,7 @@ const codice = ['00_Configurazione.gs', '10_Utilita.gs', '30_Motore.gs']
   .join('\n\n');
 
 const api = new Function('SpreadsheetApp', 'Utilities', 'Logger',
-  codice + '\nreturn { calcolaSostituzioni_, leggiDisponibilita_, leggiAssenzeDelGiorno_ };'
+  codice + '\nreturn { calcolaSostituzioni_, leggiDisponibilita_, leggiAssenzeDelGiorno_, aData_, giornoSettimana_, dataItaliana_ };'
 )(SpreadsheetAppStub, UtilitiesStub, { log: console.log });
 
 // ---- dati di prova -------------------------------------------------------
@@ -154,5 +163,98 @@ assert.strictEqual(righe2[2][7], '', 'oltre il tetto di 2 sostituzioni al giorno
 assert.strictEqual(righe2[3][7], '', 'nessuna disponibilità alla 5ª ora');
 assert.strictEqual(esito2.scoperte.length, 2);
 assert.ok(/nessun docente disponibile/.test(righe2[3][8]));
+
+// ---- scenario 3: nella stessa ora vince l'affinità, non l'ordine delle righe --
+fogli['Assenti'] = new Foglio([
+  ['Data', 'Ora', 'Classe', 'Docente assente', 'Disciplina', 'Tipo assenza', 'Note', 'Sostituto', 'Criterio'],
+  [LUN, 6, '4B', 'Blu Elena', 'Inglese', 'Malattia', '', '', ''],     // riga che viene prima
+  [LUN, 6, '3A', 'Bianchi Anna', 'Italiano', 'Malattia', '', '', '']  // Verdi fa parte del consiglio della 3A
+]);
+fogli['Disponibilità'] = new Foglio([
+  ['Docente', 'Giorno', 'Ora', 'Tipo', 'Valida dal', 'Valida al', 'Note'],
+  ['Verdi Luca', 'Lunedì', 6, 'Disposizione', '', '', '']
+]);
+
+api.calcolaSostituzioni_(LUN);
+const righe3 = fogli['Assenti'].v.slice(1);
+console.log('\nscenario 3:', JSON.stringify(righe3.map(function (r) { return [r[2], r[7]]; })));
+assert.strictEqual(righe3[1][7], 'Verdi Luca', 'il docente va nella classe del suo consiglio');
+assert.strictEqual(righe3[0][7], '', 'l\'altra classe resta scoperta');
+
+// ---- scenario 4: foglio con fuso orario diverso da quello dello script -------
+// Un file caricato su Drive può avere il fuso GMT: le date nelle celle sono la
+// mezzanotte GMT, mentre la data scritta nel popup viene costruita nel fuso dello script.
+fusoFoglio = 'GMT';
+const GIO_CELLA = new Date(Date.UTC(2026, 8, 17)); // come Sheets restituisce 17/09/2026 in un foglio GMT
+
+fogli['Assenti'] = new Foglio([
+  ['Data', 'Ora', 'Classe', 'Docente assente', 'Disciplina', 'Tipo assenza', 'Note', 'Sostituto', 'Criterio'],
+  [GIO_CELLA, 2, '3A', 'Bianchi Anna', 'Italiano', 'Malattia', '', '', '']
+]);
+fogli['Disponibilità'] = new Foglio([
+  ['Docente', 'Giorno', 'Ora', 'Tipo', 'Valida dal', 'Valida al', 'Note'],
+  ['Verdi Luca', 'Giovedì', 2, 'Disposizione', GIO_CELLA, GIO_CELLA, ''] // valida solo quel giorno
+]);
+
+const dalPopup = api.aData_('17/09/2026');
+assert.strictEqual(api.dataItaliana_(dalPopup), '17/09/2026', 'la data del popup non deve slittare al giorno prima');
+assert.strictEqual(api.giornoSettimana_(dalPopup), 'Giovedì');
+
+const esito4 = api.calcolaSostituzioni_(dalPopup);
+console.log('\nscenario 4:', JSON.stringify(esito4));
+assert.strictEqual(fogli['Assenti'].v[1][7], 'Verdi Luca', 'assenza trovata e disponibilità valida nell\'ultimo giorno');
+fusoFoglio = 'Europe/Rome';
+
+// ---- scenario 5: "A pagamento" è l'ultima risorsa ---------------------------
+// Alla 2ª ora c'è un docente pagato del consiglio di classe e uno gratuito estraneo:
+// deve vincere il gratuito. Alla 5ª ora resta solo il pagato, che viene usato.
+fogli['Assenti'] = new Foglio([
+  ['Data', 'Ora', 'Classe', 'Docente assente', 'Disciplina', 'Tipo assenza', 'Note', 'Sostituto', 'Criterio'],
+  [LUN, 2, '3A', 'Bianchi Anna', 'Italiano', 'Malattia', '', '', ''],
+  [LUN, 5, '3A', 'Bianchi Anna', 'Italiano', 'Malattia', '', '', '']
+]);
+fogli['Disponibilità'] = new Foglio([
+  ['Docente', 'Giorno', 'Ora', 'Tipo', 'Valida dal', 'Valida al', 'Note'],
+  ['Verdi Luca', 'Lunedì', 2, 'A pagamento', '', '', ''],   // consiglio della 3A, ma retribuito
+  ['Blu Elena', 'Lunedì', 2, 'Disposizione', '', '', ''],   // estranea alla 3A, ma gratuita
+  ['Verdi Luca', 'Lunedì', 5, 'A pagamento', '', '', '']    // unica possibilità
+]);
+
+const esito5 = api.calcolaSostituzioni_(LUN);
+const righe5 = fogli['Assenti'].v.slice(1);
+console.log('\nscenario 5:', JSON.stringify(righe5.map(function (r) { return [r[1], r[7], r[8]]; })));
+
+assert.strictEqual(righe5[0][7], 'Blu Elena', 'il docente gratuito batte quello a pagamento del consiglio di classe');
+assert.strictEqual(righe5[1][7], 'Verdi Luca', 'se non resta altro si usa l\'ora a pagamento');
+assert.ok(/A pagamento/.test(righe5[1][8]), 'il criterio dichiara che è un\'ora retribuita');
+assert.strictEqual(esito5.aPagamento, 1, 'il riepilogo conta le ore retribuite');
+assert.strictEqual(esito5.scoperte.length, 0);
+
+// ---- scenario 6: più classi nella stessa ora, una sola copribile a pagamento --
+// I gratuiti prendono le classi del proprio consiglio; il pagato copre quella che
+// resterebbe scoperta, non una qualsiasi.
+fogli['Assenti'] = new Foglio([
+  ['Data', 'Ora', 'Classe', 'Docente assente', 'Disciplina', 'Tipo assenza', 'Note', 'Sostituto', 'Criterio'],
+  [LUN, 6, '4B', 'Blu Elena', 'Inglese', 'Malattia', '', '', ''],
+  [LUN, 6, '3A', 'Bianchi Anna', 'Italiano', 'Malattia', '', '', ''],
+  [LUN, 6, '5C', 'Neri Sara', 'Matematica', 'Malattia', '', '', '']  // classe senza docenti liberi
+]);
+fogli['Disponibilità'] = new Foglio([
+  ['Docente', 'Giorno', 'Ora', 'Tipo', 'Valida dal', 'Valida al', 'Note'],
+  ['Verdi Luca', 'Lunedì', 6, 'Disposizione', '', '', ''],   // consiglio della 3A
+  ['Rossi Mario', 'Lunedì', 6, 'Disposizione', '', '', ''],  // consigli di 3A e 4B
+  ['Gialli Paolo', 'Lunedì', 6, 'A pagamento', '', '', '']   // sostegno, retribuito
+]);
+
+const esito6 = api.calcolaSostituzioni_(LUN);
+const perClasse6 = {};
+fogli['Assenti'].v.slice(1).forEach(function (r) { perClasse6[r[2]] = r[7]; });
+console.log('\nscenario 6:', JSON.stringify(perClasse6), JSON.stringify(esito6));
+
+assert.strictEqual(perClasse6['3A'], 'Verdi Luca');
+assert.strictEqual(perClasse6['4B'], 'Rossi Mario');
+assert.strictEqual(perClasse6['5C'], 'Gialli Paolo', 'il pagato copre la classe rimasta senza nessuno');
+assert.strictEqual(esito6.aPagamento, 1);
+assert.strictEqual(esito6.scoperte.length, 0);
 
 console.log('\nTutte le verifiche superate.');

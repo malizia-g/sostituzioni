@@ -111,6 +111,10 @@ function mostraEsito_(data, esito, documento) {
     html += '<p>Ore da coprire: <b>' + esito.totale + '</b><br>' +
       'Assegnate automaticamente: <b>' + esito.assegnate + '</b><br>' +
       'Confermate a mano: <b>' + esito.manuali + '</b></p>';
+    if (esito.aPagamento) {
+      html += '<p style="color:#b06000">Di cui a pagamento: <b>' + esito.aPagamento + '</b> ' +
+        (esito.aPagamento === 1 ? 'ora' : 'ore') + '.</p>';
+    }
     if (esito.scoperte.length) {
       html += '<p style="color:#b00020">Restano scoperte:<br>• ' +
         esito.scoperte.join('<br>• ') + '</p>';

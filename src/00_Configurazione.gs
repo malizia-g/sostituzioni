@@ -31,7 +31,12 @@ const COL_ASSENTI = {
 };
 
 const GIORNI = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
-const TIPI_DISPONIBILITA = ['Disposizione', 'Recupero permesso', 'Completamento orario', 'Potenziamento', 'Compresenza'];
+const TIPI_DISPONIBILITA = ['Disposizione', 'Recupero permesso', 'Completamento orario',
+  'Potenziamento', 'Compresenza', 'A pagamento'];
+
+/** Ore retribuite: ultima risorsa, da usare solo se non c'è nessun altro modo di coprire l'ora. */
+const TIPO_A_PAGAMENTO = 'A pagamento';
+
 const TIPI_ASSENZA = ['Malattia', 'Permesso', 'Ferie', 'Formazione', 'Uscita didattica', 'Sciopero', 'Altro'];
 const RUOLI = ['Docente', 'Coordinatore', 'ITP', 'Sostegno'];
 
@@ -51,10 +56,12 @@ const IMPOSTAZIONI_DEFAULT = [
   ['Max sostituzioni per docente al giorno', '2', 'Oltre questa soglia il docente non viene più proposto.'],
   ['Peso stessa classe', '100', 'Punti per un docente che insegna nella classe scoperta.'],
   ['Peso stessa disciplina', '60', 'Punti per un docente che insegna la stessa disciplina dell\'ora scoperta.'],
-  ['Priorità tipi disponibilità', 'Recupero permesso, Disposizione, Completamento orario, Potenziamento, Compresenza',
+  ['Priorità tipi disponibilità', 'Recupero permesso, Disposizione, Completamento orario, Potenziamento, Compresenza, A pagamento',
     'Ordine di preferenza: il primo tipo vale di più. Modifica l\'ordine per cambiare la precedenza.'],
   ['Penalità docente di sostegno', '500', 'Sottratta ai docenti con ruolo "Sostegno". Con un valore alto ' +
     'vengono impiegati solo se non c\'è nessun altro; metti 0 per trattarli come gli altri.'],
+  ['Penalità disponibilità a pagamento', '1000', 'Sottratta alle ore di tipo "A pagamento". Più alta di quella ' +
+    'del sostegno: sono l\'ultima risorsa e vengono proposte solo se l\'ora resterebbe scoperta.'],
   ['Penalità per ogni sostituzione già assegnata oggi', '25', 'Distribuisce il carico nella giornata.'],
   ['Penalità per ogni sostituzione recente', '3', 'Distribuisce il carico nel periodo (vedi finestra sotto).'],
   ['Giorni di storico considerati', '30', 'Ampiezza della finestra per la penalità "sostituzione recente".'],

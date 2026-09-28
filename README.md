@@ -66,6 +66,18 @@ permesso, poi le ore di disposizione) e il carico già sostenuto, sia nella gior
 nei 30 giorni precedenti: a parità di titolo viene proposto chi ha sostituito di meno.
 I docenti di sostegno sono impiegati solo se non resta nessun altro.
 
+Due tipi di disponibilità fanno eccezione alla graduatoria e valgono come ultima
+risorsa, perché hanno un costo — didattico o economico — che nessuna affinità compensa:
+
+| Tipo | Quando viene proposto | Impostazione |
+|---|---|---|
+| ruolo **Sostegno** nei consigli di classe | solo se l'ora resterebbe scoperta | *Penalità docente di sostegno*, 500 |
+| **A pagamento** | per ultimo, dopo ogni altra possibilità, sostegno compreso | *Penalità disponibilità a pagamento*, 1000 |
+
+Le ore retribuite restano riconoscibili: la colonna *Criterio* riporta «(A pagamento)»,
+il riepilogo a fine calcolo ne indica il numero e la stessa dicitura finisce nella
+colonna *Criterio* del documento. Se preferisci trattarle come le altre, basta azzerare la penalità.
+
 Tutti i pesi sono numeri modificabili nel foglio **Impostazioni**, senza toccare il
 codice. Le ore con meno candidati vengono assegnate per prime, così l'unico docente
 possibile per un'ora difficile non viene consumato da un'ora che si sarebbe coperta

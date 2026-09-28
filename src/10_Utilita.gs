@@ -22,7 +22,13 @@ function dataItaliana_(valore) {
   return data ? Utilities.formatDate(data, fusoOrario_(), 'dd/MM/yyyy') : '';
 }
 
-/** Converte in Date un valore che può essere Date, stringa gg/mm/aaaa o aaaa-mm-gg. */
+/**
+ * Converte in Date un valore che può essere Date, stringa gg/mm/aaaa o aaaa-mm-gg.
+ *
+ * Le date scritte come testo vengono fissate a mezzogiorno: lo script e il foglio
+ * possono avere fusi orari diversi e la mezzanotte dell'uno può cadere nel giorno
+ * precedente dell'altro. A mezzogiorno il giorno di calendario resta lo stesso.
+ */
 function aData_(valore) {
   if (valore instanceof Date && !isNaN(valore.getTime())) { return valore; }
   const testo = String(valore === null || valore === undefined ? '' : valore).trim();
@@ -31,16 +37,17 @@ function aData_(valore) {
   let m = testo.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
   if (m) {
     const anno = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-    return new Date(anno, Number(m[2]) - 1, Number(m[1]));
+    return new Date(anno, Number(m[2]) - 1, Number(m[1]), 12);
   }
   m = testo.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m) { return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); }
+  if (m) { return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12); }
   return null;
 }
 
-/** Nome del giorno della settimana ("Lunedì", ...). */
+/** Nome del giorno della settimana ("Lunedì", ...), calcolato nel fuso orario del foglio. */
 function giornoSettimana_(data) {
-  return GIORNI[data.getDay()];
+  // "u" restituisce 1 = lunedì ... 7 = domenica; GIORNI parte dalla domenica.
+  return GIORNI[Number(Utilities.formatDate(data, fusoOrario_(), 'u')) % 7];
 }
 
 function fusoOrario_() {
